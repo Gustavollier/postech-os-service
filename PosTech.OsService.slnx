@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PosTech.Contratos/PosTech.Contratos.csproj" />
+    <Project Path="src/PosTech.Mensageria/PosTech.Mensageria.csproj" />
+    <Project Path="src/PosTech.Os.Api/PosTech.Os.Api.csproj" />
+    <Project Path="src/PosTech.Persistencia/PosTech.Persistencia.csproj" />
+    <Project Path="src/PosTech.Saga/PosTech.Saga.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PosTech.Os.Testes/PosTech.Os.Testes.csproj" />
+  </Folder>
+</Solution>

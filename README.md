@@ -1,0 +1,125 @@
+# postech-os-service
+
+Microsserviço de **Ordem de Serviço** do Tech Challenge Fase 4 (FIAP 13SOAT).
+
+Dono da ordem, do status e do histórico — e **orquestrador da Saga** que
+coordena o fluxo entre os quatro serviços.
+
+## O que este serviço faz
+
+| Responsabilidade | Detalhe |
+| --- | --- |
+| Abrir ordem de serviço | Grava a ordem, o estado inicial da saga e o evento `OrdemAberta` numa transação só |
+| Status e histórico | Toda transição vira linha em `StatusHistorico`, com o motivo |
+| Orquestrar a saga | Decide o próximo passo e dispara a compensação quando algo falha |
+| Compensar por timeout | Varre sagas paradas esperando a execução além do prazo |
+
+Banco: **Azure SQL** (`os-db`). Mensageria: **RabbitMQ**.
+
+## A Saga
+
+Estratégia: **orquestrada**, com o orquestrador aqui dentro. A justificativa
+completa está em [`docs/ADR-0006-saga-orquestrada.md`](docs/ADR-0006-saga-orquestrada.md).
+
+Em resumo: coreografia é mais idiomática, mas orquestração dá um lugar único
+onde o estado da saga aparece e onde a compensação tem dono explícito. E o
+`OrdemServicoDomainService` da Fase 2 já era uma máquina de estados — o
+orquestrador é essa máquina coordenando passos que passaram a morar fora do
+processo.
+
+```
+1. Abrir a OS              OS Service   -> OrdemAberta
+2. Diagnóstico             Execução     -> DiagnosticoConcluido (leva os itens)
+3. Orçamento               Billing      -> OrcamentoGerado
+4. Aprovação e cobrança    Billing      -> OrcamentoAprovado
+5. Pagamento confirmado    Billing      -> PagamentoConfirmado
+6. Execução e fechamento   Execução     -> ExecucaoFinalizada
+```
+
+### Compensações
+
+| Falha | O que acontece |
+| --- | --- |
+| Orçamento rejeitado | Cancela o orçamento e a ordem |
+| Pagamento recusado | **Volta um passo**, não cancela: o cliente pode tentar outro meio e o orçamento continua valendo |
+| Execução não assume no prazo | Estorna o pagamento e cancela a ordem |
+| Falha ao publicar | Nenhuma: o evento fica no outbox e é reenviado |
+
+A regra que organiza todas: **compensar só o que de fato aconteceu**. Cancelar
+antes de existir orçamento não publica `OrcamentoCancelado`; estornar o que
+nunca foi pago inventaria movimento financeiro.
+
+## Por que outbox
+
+Gravar no banco e publicar no broker são recursos diferentes e não cabem numa
+transação só. Publicar antes de gravar inventa um evento sobre uma ordem que
+pode não existir; gravar antes de publicar perde o evento se o processo morrer
+no meio.
+
+Com outbox, gravar a ordem e enfileirar o evento é **uma transação local**, e um
+processo à parte entrega depois. O publicador sobe com *publisher confirmations*
+ligadas: sem elas, o `BasicPublish` devolve assim que o byte sai do processo e o
+outbox marcaria como publicado um evento que o broker nunca aceitou.
+
+Do outro lado, `EventoProcessado` garante idempotência: o RabbitMQ entrega ao
+menos uma vez, e sem o registro isso viraria orçamento e cobrança duplicados.
+
+## Rotas
+
+| Método | Rota | O quê |
+| --- | --- | --- |
+| `POST` | `/api/v1/ordens-servico` | Abre a ordem |
+| `GET` | `/api/v1/ordens-servico` | Lista, na prioridade da recepção. `?idCliente=` filtra |
+| `GET` | `/api/v1/ordens-servico/{id}` | Detalhe |
+| `GET` | `/api/v1/ordens-servico/{id}/status` | Status e histórico com motivos |
+| `GET` | `/api/v1/ordens-servico/{id}/saga` | Estado da saga — é aqui que se mostra `Compensando` e o porquê |
+| `GET` | `/health` · `/health/ready` | Liveness e readiness |
+
+Swagger em `/swagger`.
+
+## Rodar local
+
+```bash
+# Infraestrutura (RabbitMQ, SQL Server, Mongo)
+docker compose -f docker-compose.yml up -d
+
+# Schema
+sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -No -i src/PosTech.Persistencia/schema-os.sql
+sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -No -i src/PosTech.Persistencia/schema-mensageria.sql
+
+# API
+export SqlConnectionString="Server=localhost;Database=os-db;User Id=sa;Password=...;TrustServerCertificate=true"
+export RabbitMqConnectionString="amqp://postech:senha@localhost:5672/"
+dotnet run --project src/PosTech.Os.Api
+```
+
+## Testes
+
+```bash
+dotnet test
+```
+
+Os testes de integração sobem RabbitMQ e SQL Server de verdade via
+Testcontainers — precisa de Docker. Dublê não prova topologia nem atomicidade de
+transação, que é justamente o que mais importa aqui.
+
+A pipeline **reprova abaixo de 80% de cobertura**. Na Fase 3 a cobertura era
+medida e ignorada; aqui ela é um gate.
+
+## Configuração
+
+| Variável | O quê |
+| --- | --- |
+| `SqlConnectionString` | Conexão com o `os-db`. Obrigatória |
+| `RabbitMqConnectionString` | Conexão AMQP. Obrigatória |
+| `Saga__PrazoDeExecucaoEmMinutos` | Quanto esperar a execução antes de compensar. Padrão 60 |
+| `Saga__IntervaloDaVarreduraEmMinutos` | De quanto em quanto tempo varrer. Padrão 5 |
+
+As duas primeiras são obrigatórias e o serviço **se recusa a subir sem elas** —
+falhar na partida é melhor que descobrir na primeira requisição.
+
+## Documentação
+
+- [ADR-0006 — Saga orquestrada](docs/ADR-0006-saga-orquestrada.md)
+- [ADR-0007 — Um banco por serviço](docs/ADR-0007-banco-por-servico.md)
+- [ADR-0008 — CQRS só como separação de código](docs/ADR-0008-cqrs-sem-infraestrutura-nova.md)
