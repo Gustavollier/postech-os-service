@@ -148,7 +148,7 @@ public sealed class BarramentoIntegracaoTests : IAsyncLifetime
         await using var publicador = new PublicadorRabbitMq(_conexao);
         await publicador.PublicarAsync(linha);
 
-        var canal = await _conexao.ObterCanalAsync();
+        await using var canal = await _conexao.CriarCanalAsync();
         var dlq = Topologia.DeadLetterDe(Topologia.FilaExecucao);
 
         BasicGetResult? naDeadLetter = null;

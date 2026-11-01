@@ -63,6 +63,7 @@ public sealed class ConsumidorDeEventos : IAsyncDisposable
     private readonly Func<DateTime> _agora;
 
     private IChannel? _canal;
+    private AsyncEventingBasicConsumer? _consumidor;
 
     public ConsumidorDeEventos(
         ConexaoRabbitMq conexao,
@@ -95,7 +96,10 @@ public sealed class ConsumidorDeEventos : IAsyncDisposable
 
     public async Task IniciarAsync(CancellationToken cancellationToken = default)
     {
-        _canal = await _conexao.ObterCanalAsync(cancellationToken).ConfigureAwait(false);
+        // Canal próprio: o prefetch abaixo vale para o canal inteiro, e num
+        // canal compartilhado com o publicador ele passaria a limitar a
+        // publicação também.
+        _canal = await _conexao.CriarCanalAsync(cancellationToken).ConfigureAwait(false);
 
         // Um por vez. Com prefetch alto, uma réplica puxa a fila inteira para a
         // memória e as outras ficam ociosas; pior, uma mensagem lenta segura
@@ -103,13 +107,16 @@ public sealed class ConsumidorDeEventos : IAsyncDisposable
         await _canal.BasicQosAsync(prefetchSize: 0, prefetchCount: 1, global: false, cancellationToken)
             .ConfigureAwait(false);
 
-        var consumidor = new AsyncEventingBasicConsumer(_canal);
-        consumidor.ReceivedAsync += AoReceberAsync;
+        // Guardado em campo: o canal mantém referência ao consumidor, mas
+        // deixar isso implícito é confiar em detalhe de implementação para o
+        // objeto não ser coletado no meio do consumo.
+        _consumidor = new AsyncEventingBasicConsumer(_canal);
+        _consumidor.ReceivedAsync += AoReceberAsync;
 
         await _canal.BasicConsumeAsync(
             queue: _nomeDaFila,
             autoAck: false,
-            consumer: consumidor,
+            consumer: _consumidor,
             cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
@@ -178,5 +185,13 @@ public sealed class ConsumidorDeEventos : IAsyncDisposable
         }
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    /// <summary>
+    /// Fecha o canal do consumidor. A conexão não: ela é do processo e outros
+    /// consumidores e o publicador ainda a usam.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_canal is not null)
+            await _canal.DisposeAsync().ConfigureAwait(false);
+    }
 }

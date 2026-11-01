@@ -12,21 +12,26 @@ namespace PosTech.Persistencia;
 public sealed class OutboxRepositorio : IRepositorioDeOutbox
 {
     /// <summary>
-    /// A leitura do lote usa UPDLOCK e READPAST de propósito.
+    /// Reserva o lote e devolve o que reservou, numa operação só.
     ///
-    /// Com duas ou três réplicas do serviço no AKS, todas rodam o processador do
-    /// outbox ao mesmo tempo. Sem isso, as três leem as mesmas linhas e publicam
-    /// o mesmo evento três vezes — o consumidor deduplicaria, mas o tráfego e o
-    /// log triplicariam sem motivo. UPDLOCK trava as linhas lidas; READPAST faz
-    /// as outras réplicas pularem o que já está travado em vez de esperar.
+    /// Com duas ou três réplicas no AKS, todas rodam o processador ao mesmo
+    /// tempo e sem reserva as três publicariam o mesmo evento. O consumidor
+    /// deduplicaria, mas o tráfego e o log triplicariam à toa.
+    ///
+    /// A reserva é um UPDATE com OUTPUT, e não um SELECT com UPDLOCK: o lock de
+    /// leitura morre no commit da transação, que acontece ANTES da publicação —
+    /// ele não protegeria nada. Empurrar ProximaTentativaEm para a frente é uma
+    /// trava que sobrevive ao commit, e que se solta sozinha: se o processo
+    /// morrer no meio da publicação, o prazo vence e outra réplica reprocessa.
     /// </summary>
-    private const string OBTER_PENDENTES = @"
-        SELECT TOP (@Limite)
-               Id, MensagemId, Tipo, RoutingKey, Payload, CorrelationId,
-               Status, Tentativas, CriadoEm, PublicadoEm, ProximaTentativaEm, UltimoErro
-        FROM EventoOutbox WITH (UPDLOCK, READPAST)
-        WHERE Status = 0 AND ProximaTentativaEm <= SYSUTCDATETIME()
-        ORDER BY Id";
+    private const string RESERVAR_PENDENTES = @"
+        UPDATE TOP (@Limite) EventoOutbox WITH (READPAST)
+        SET ProximaTentativaEm = DATEADD(SECOND, @ReservaEmSegundos, SYSUTCDATETIME())
+        OUTPUT inserted.Id, inserted.MensagemId, inserted.Tipo, inserted.RoutingKey,
+               inserted.Payload, inserted.CorrelationId, inserted.Status,
+               inserted.Tentativas, inserted.CriadoEm, inserted.PublicadoEm,
+               inserted.ProximaTentativaEm, inserted.UltimoErro
+        WHERE Status = 0 AND ProximaTentativaEm <= SYSUTCDATETIME()";
 
     private const string INSERIR = @"
         INSERT INTO EventoOutbox
@@ -86,22 +91,23 @@ public sealed class OutboxRepositorio : IRepositorioDeOutbox
         return await conexao.ExecuteScalarAsync<long>(comando).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Quanto tempo uma réplica tem para publicar o que reservou antes de o
+    /// evento voltar para a fila. Generoso o bastante para um broker lento,
+    /// curto o bastante para a recuperação não demorar quando um pod morre.
+    /// </summary>
+    public const int ReservaEmSegundos = 30;
+
     public async Task<IReadOnlyList<EventoOutbox>> ObterPendentesAsync(int limite, CancellationToken cancellationToken = default)
     {
         await using var conexao = new SqlConnection(_connectionString);
-        await conexao.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        // A transação fecha junto com o using: os locks de UPDLOCK só valem
-        // enquanto ela estiver aberta, e segurá-los durante a publicação
-        // deixaria a tabela travada o tempo da rede.
-        await using var transacao = (SqlTransaction)await conexao.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
         var comando = new CommandDefinition(
-            OBTER_PENDENTES, new { Limite = limite }, transaction: transacao, cancellationToken: cancellationToken);
+            RESERVAR_PENDENTES,
+            new { Limite = limite, ReservaEmSegundos },
+            cancellationToken: cancellationToken);
 
         var linhas = (await conexao.QueryAsync<EventoOutbox>(comando).ConfigureAwait(false)).ToList();
-
-        await transacao.CommitAsync(cancellationToken).ConfigureAwait(false);
 
         return linhas;
     }

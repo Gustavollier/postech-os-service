@@ -100,6 +100,11 @@ public static class OrquestradorDaSaga
         estado.Valor = evento.Valor;
         estado.AtualizadoEm = agora;
 
+        // Uma recusa anterior deixou o motivo aqui. O pagamento passou agora, e
+        // deixar "Cartão sem limite" grudado numa ordem que foi paga e executada
+        // é o tipo de coisa que o cliente lê na tela e não entende.
+        estado.MotivoDaCompensacao = null;
+
         return new Decisao(estado, [], Mudou: true);
     }
 

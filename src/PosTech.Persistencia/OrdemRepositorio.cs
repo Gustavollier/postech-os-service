@@ -22,6 +22,43 @@ public sealed record MudancaDeStatus(
     string? Motivo,
     DateTime OcorridoEm);
 
+/// <summary>
+/// As linhas como o banco devolve, antes de virarem domínio.
+///
+/// Dapper materializa record posicional casando o construtor por tipo, e
+/// TINYINT chega como <see cref="byte"/> — não como o enum. Sem este
+/// intermediário, toda leitura de ordem estoura em runtime com
+/// "a parameterless default constructor ... is required". É o mesmo padrão
+/// que <c>SagaRepositorio</c> já usa.
+/// </summary>
+internal sealed class LinhaDeOrdem
+{
+    public int Id { get; set; }
+    public int IdCliente { get; set; }
+    public int IdVeiculo { get; set; }
+    public int IdFuncionario { get; set; }
+    public byte Status { get; set; }
+    public string? NomeCliente { get; set; }
+    public string? DescricaoVeiculo { get; set; }
+    public DateTime CriadoEm { get; set; }
+    public DateTime? AtualizadoEm { get; set; }
+
+    public OrdemResumida Para() => new(
+        Id, IdCliente, IdVeiculo, IdFuncionario, (EStatusOrdem)Status,
+        NomeCliente, DescricaoVeiculo, CriadoEm, AtualizadoEm);
+}
+
+internal sealed class LinhaDeHistorico
+{
+    public byte? StatusAnterior { get; set; }
+    public byte StatusNovo { get; set; }
+    public string? Motivo { get; set; }
+    public DateTime OcorridoEm { get; set; }
+
+    public MudancaDeStatus Para() => new(
+        (EStatusOrdem?)StatusAnterior, (EStatusOrdem)StatusNovo, Motivo, OcorridoEm);
+}
+
 public interface IOrdemRepositorio
 {
     /// <summary>
@@ -214,27 +251,29 @@ public sealed class OrdemRepositorio : IOrdemRepositorio
     {
         await using var conexao = new SqlConnection(_connectionString);
 
-        return await conexao.QueryFirstOrDefaultAsync<OrdemResumida>(
+        var linha = await conexao.QueryFirstOrDefaultAsync<LinhaDeOrdem>(
             new CommandDefinition(OBTER, new { Id = id }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        return linha?.Para();
     }
 
     public async Task<IReadOnlyList<OrdemResumida>> ListarAsync(int? idCliente, CancellationToken cancellationToken = default)
     {
         await using var conexao = new SqlConnection(_connectionString);
 
-        var linhas = await conexao.QueryAsync<OrdemResumida>(
+        var linhas = await conexao.QueryAsync<LinhaDeOrdem>(
             new CommandDefinition(LISTAR, new { IdCliente = idCliente }, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
-        return linhas.ToList();
+        return linhas.Select(l => l.Para()).ToList();
     }
 
     public async Task<IReadOnlyList<MudancaDeStatus>> HistoricoAsync(int idOrdem, CancellationToken cancellationToken = default)
     {
         await using var conexao = new SqlConnection(_connectionString);
 
-        var linhas = await conexao.QueryAsync<MudancaDeStatus>(
+        var linhas = await conexao.QueryAsync<LinhaDeHistorico>(
             new CommandDefinition(HISTORICO, new { IdOrdem = idOrdem }, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
-        return linhas.ToList();
+        return linhas.Select(l => l.Para()).ToList();
     }
 }

@@ -37,7 +37,7 @@ public sealed class PublicadorRabbitMq : IPublicadorDeEventos, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(evento);
 
-        var canal = await _conexao.ObterCanalAsync(cancellationToken).ConfigureAwait(false);
+        var canal = await _conexao.ObterCanalDePublicacaoAsync(cancellationToken).ConfigureAwait(false);
 
         var propriedades = new BasicProperties
         {
@@ -98,7 +98,16 @@ public sealed class ConexaoRabbitMq : IAsyncDisposable
         };
     }
 
-    public async Task<IChannel> ObterCanalAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// O canal de publicação, um por processo, com confirmação ligada.
+    ///
+    /// Publicar e consumir NÃO podem dividir canal. Canal não é seguro para uso
+    /// concorrente, e o <c>BasicQos</c> que o consumidor define vale para o
+    /// canal inteiro — num canal compartilhado ele passaria a limitar também o
+    /// publicador. Pior: a confirmação de publicação e a entrega ao consumidor
+    /// se intercalariam no mesmo fluxo do protocolo.
+    /// </summary>
+    public async Task<IChannel> ObterCanalDePublicacaoAsync(CancellationToken cancellationToken = default)
     {
         if (_canal is { IsOpen: true })
             return _canal;
@@ -109,13 +118,13 @@ public sealed class ConexaoRabbitMq : IAsyncDisposable
             if (_canal is { IsOpen: true })
                 return _canal;
 
-            _conexao ??= await _fabrica.CreateConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var conexao = await ObterConexaoAsync(cancellationToken).ConfigureAwait(false);
 
             var opcoes = new CreateChannelOptions(
                 publisherConfirmationsEnabled: true,
                 publisherConfirmationTrackingEnabled: true);
 
-            _canal = await _conexao.CreateChannelAsync(opcoes, cancellationToken).ConfigureAwait(false);
+            _canal = await conexao.CreateChannelAsync(opcoes, cancellationToken).ConfigureAwait(false);
 
             return _canal;
         }
@@ -126,13 +135,39 @@ public sealed class ConexaoRabbitMq : IAsyncDisposable
     }
 
     /// <summary>
+    /// Um canal novo, para quem precisa do seu. Consumidor usa este: cada
+    /// consumidor tem o seu canal, com o seu próprio prefetch.
+    ///
+    /// Quem chama é dono do canal e responde por fechá-lo.
+    /// </summary>
+    public async Task<IChannel> CriarCanalAsync(CancellationToken cancellationToken = default)
+    {
+        var conexao = await ObterConexaoAsync(cancellationToken).ConfigureAwait(false);
+
+        return await conexao.CreateChannelAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<IConnection> ObterConexaoAsync(CancellationToken cancellationToken)
+    {
+        if (_conexao is { IsOpen: true })
+            return _conexao;
+
+        _conexao ??= await _fabrica.CreateConnectionAsync(cancellationToken).ConfigureAwait(false);
+
+        return _conexao;
+    }
+
+    /// <summary>
     /// Declara exchange, filas, dead letters e bindings a partir de
     /// <see cref="Topologia"/>. Idempotente: rodar na subida de todo serviço é
     /// seguro e evita a ordem de inicialização virar requisito.
     /// </summary>
     public async Task DeclararTopologiaAsync(CancellationToken cancellationToken = default)
     {
-        var canal = await ObterCanalAsync(cancellationToken).ConfigureAwait(false);
+        // Canal descartável: declarar topologia é operação de partida e um erro
+        // aqui (fila declarada antes com outros argumentos) fecha o canal. Num
+        // canal compartilhado isso derrubaria publicação e consumo junto.
+        await using var canal = await CriarCanalAsync(cancellationToken).ConfigureAwait(false);
 
         await canal.ExchangeDeclareAsync(
             Topologia.Exchange, ExchangeType.Topic, durable: true, autoDelete: false,
