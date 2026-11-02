@@ -1,5 +1,7 @@
 # postech-os-service
 
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=postech4_postech-os-service&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=postech4_postech-os-service) [![Cobertura](https://sonarcloud.io/api/project_badges/measure?project=postech4_postech-os-service&metric=coverage)](https://sonarcloud.io/summary/new_code?id=postech4_postech-os-service) [![Bugs](https://sonarcloud.io/api/project_badges/measure?project=postech4_postech-os-service&metric=bugs)](https://sonarcloud.io/summary/new_code?id=postech4_postech-os-service) [![Vulnerabilidades](https://sonarcloud.io/api/project_badges/measure?project=postech4_postech-os-service&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=postech4_postech-os-service) [![CI/CD](https://github.com/Gustavollier/postech-os-service/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/Gustavollier/postech-os-service/actions/workflows/ci-cd.yml)
+
 Microsserviço de **Ordem de Serviço** do Tech Challenge Fase 4 (FIAP 13SOAT).
 
 Dono da ordem, do status e do histórico — e **orquestrador da Saga** que
