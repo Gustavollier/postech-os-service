@@ -99,12 +99,27 @@ dotnet run --project src/PosTech.Os.Api
 dotnet test
 ```
 
-Os testes de integração sobem RabbitMQ e SQL Server de verdade via
-Testcontainers — precisa de Docker. Dublê não prova topologia nem atomicidade de
-transação, que é justamente o que mais importa aqui.
+**88 testes, 94% de cobertura de linha.** Os de integração sobem RabbitMQ e SQL
+Server de verdade via Testcontainers — precisa de Docker. Dublê não prova
+topologia nem atomicidade de transação, que é justamente o que mais importa
+aqui.
+
+Três grupos, em ordem de quanto cada um pega:
+
+- **`SagaPontaAPontaTests`** — os quatro serviços conversando por um broker de
+  verdade, com as compensações todas. Achou três defeitos de concorrência que
+  nenhum teste de unidade pegaria.
+- **`ApiDoOsServiceTests`** — a API no ar, com SQL Server e RabbitMQ. Esta
+  camada esteve com cobertura **zero** por um tempo, e não por ser trivial: é
+  onde o corpo da requisição vira evento no outbox. Foi um defeito aqui — o
+  `OrdemResumida` como record posicional, que o Dapper não conseguia materializar
+  de um enum vindo de `TINYINT` — que fazia o `GET /{id}` devolver 500 com 50
+  testes verdes ao lado.
+- **regras e contratos** — as funções puras da saga e o formato do fio.
 
 A pipeline **reprova abaixo de 80% de cobertura**. Na Fase 3 a cobertura era
-medida e ignorada; aqui ela é um gate.
+medida e ignorada; aqui ela é um gate — e já reprovou de verdade, quando a
+cobertura caiu para 76%.
 
 ## Configuração
 
