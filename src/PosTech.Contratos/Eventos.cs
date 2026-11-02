@@ -42,6 +42,15 @@ public sealed record OrdemAberta(
 public sealed record DiagnosticoConcluido(
     int IdOrdem,
     int IdFuncionarioResponsavel,
+    // O cliente vem junto porque é o Billing quem consome este evento, e ele
+    // precisa do nome para o orçamento e do e-mail para o adquirente. O
+    // Execução não usa nenhum dos dois: ele recebeu em OrdemAberta e repassa.
+    // Carregar dado que não se usa parece desperdício até a alternativa
+    // aparecer — que seria o Billing perguntar ao Identidade, e a geração de
+    // orçamento passar a depender do Identidade estar no ar.
+    int IdCliente,
+    string NomeCliente,
+    string EmailCliente,
     IReadOnlyList<ItemDaOrdem> Itens,
     decimal ValorTotal,
     DateTime ConcluidoEm);
