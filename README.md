@@ -99,7 +99,7 @@ dotnet run --project src/PosTech.Os.Api
 dotnet test
 ```
 
-**88 testes, 94% de cobertura de linha.** Os de integração sobem RabbitMQ e SQL
+**93 testes, 94% de cobertura de linha**, sendo 5 deles cenários BDD. Os de integração sobem RabbitMQ e SQL
 Server de verdade via Testcontainers — precisa de Docker. Dublê não prova
 topologia nem atomicidade de transação, que é justamente o que mais importa
 aqui.
@@ -116,6 +116,38 @@ Três grupos, em ordem de quanto cada um pega:
   de um enum vindo de `TINYINT` — que fazia o `GET /{id}` devolver 500 com 50
   testes verdes ao lado.
 - **regras e contratos** — as funções puras da saga e o formato do fio.
+
+### BDD: a saga escrita como a oficina fala
+
+O fluxo completo da ordem está especificado em Gherkin, em português, com
+[Reqnroll](https://reqnroll.net), em [`tests/PosTech.Os.Testes/Bdd`](tests/PosTech.Os.Testes/Bdd):
+
+```gherkin
+Cenário: Pagamento recusado volta um passo em vez de cancelar a ordem
+  Dado que o diagnóstico foi concluído e o orçamento gerado
+  Quando o cliente aprovar o orçamento
+  E o adquirente recusar o pagamento com o motivo "Cartão sem limite"
+  Então a saga está no passo "AguardandoAprovacao"
+  E o Execução não recebe o evento "OrdemCancelada"
+  Quando o cliente aprovar o orçamento
+  E o Billing confirmar o pagamento
+  Então a saga está no passo "AguardandoExecucao"
+```
+
+| Funcionalidade | Cenários |
+| --- | --- |
+| [Saga da ordem de serviço](tests/PosTech.Os.Testes/Bdd/SagaDaOrdemDeServico.feature) | caminho feliz da abertura ao fechamento; orçamento rejeitado; pagamento recusado; evento entregue duas vezes |
+| [Compensação por prazo](tests/PosTech.Os.Testes/Bdd/CompensacaoPorPrazo.feature) | a execução não assume no prazo, a saga cancela, pede o estorno e só fecha quando ele confirma |
+
+Os cenários rodam contra o OS Service de verdade, com SQL Server e RabbitMQ.
+O Execução e o Billing são simulados publicando no broker os eventos que
+publicariam, e cada passo confere o que o orquestrador mandou para as filas
+deles e o estado na rota `/saga`. Nenhum passo chama o orquestrador por
+método, e nenhum mexe no banco.
+
+O cenário de prazo roda com o prazo de execução em três segundos, só naquela
+funcionalidade (tag `@prazo-curto`). Para isso, o prazo e o intervalo da
+varredura passaram a aceitar fração de minuto. Em produção continuam 60 e 5.
 
 A pipeline **reprova abaixo de 80% de cobertura**. Na Fase 3 a cobertura era
 medida e ignorada; aqui ela é um gate — e já reprovou de verdade, quando a

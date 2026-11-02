@@ -145,8 +145,11 @@ public sealed class VarredorDeTimeout : BackgroundService
 
         // Curto em demonstração, para a compensação caber no vídeo; longo em
         // operação real, onde um reparo leva dias.
-        _prazo = TimeSpan.FromMinutes(configuracao.GetValue("Saga:PrazoDeExecucaoEmMinutos", 60));
-        _intervalo = TimeSpan.FromMinutes(configuracao.GetValue("Saga:IntervaloDaVarreduraEmMinutos", 5));
+        // Lidos como double, e não int: fração de minuto é o que permite ao
+        // cenário BDD de compensação por prazo rodar em segundos em vez de em
+        // uma hora. Em produção os valores continuam inteiros.
+        _prazo = TimeSpan.FromMinutes(configuracao.GetValue("Saga:PrazoDeExecucaoEmMinutos", 60.0));
+        _intervalo = TimeSpan.FromMinutes(configuracao.GetValue("Saga:IntervaloDaVarreduraEmMinutos", 5.0));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

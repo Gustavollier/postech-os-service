@@ -54,8 +54,8 @@ public sealed class AmbienteDoOsService : IAsyncLifetime
 
             // Varredura de timeout bem rápida: é o que torna o cenário de
             // compensação por prazo observável num teste em vez de em uma hora.
-            builder.UseSetting("Saga__PrazoDeExecucaoEmMinutos", "60");
-            builder.UseSetting("Saga__IntervaloDaVarreduraEmMinutos", "5");
+            builder.UseSetting("Saga:PrazoDeExecucaoEmMinutos", "60");
+            builder.UseSetting("Saga:IntervaloDaVarreduraEmMinutos", "5");
         });
 
         // É o CreateClient que constrói o grafo de dependências e inicia os
