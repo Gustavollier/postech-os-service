@@ -82,6 +82,11 @@ menos uma vez, e sem o registro isso viraria orçamento e cobrança duplicados.
 
 Swagger em `/swagger`.
 
+O fluxo completo pelos quatro serviços, pelo API Management, está na coleção do Postman
+[`docs/postman/PosTech-Fase4.postman_collection.json`](docs/postman/PosTech-Fase4.postman_collection.json):
+abertura, diagnóstico, orçamento, aprovação, pagamento, execução e a compensação por rejeição,
+com testes em cada passo.
+
 ## Rodar local
 
 ```bash

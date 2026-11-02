@@ -1,0 +1,1217 @@
+{
+  "info": {
+    "_postman_id": "8367cdfa-47e8-43d3-8a80-5f8b8b9fcadc",
+    "name": "PosTech Fase 4 — Fluxo da OS pelos microsserviços",
+    "description": "Fluxo completo de uma ordem de serviço passando pelos quatro microsserviços, pelo API Management.\n\n**Como rodar**\n1. Ajuste a variável `gateway` (saída `apim_gateway_url` do Terraform do postech-infra-k8s).\n2. Na primeira vez em um ambiente novo, rode a pasta **0** (cria o primeiro funcionário falando direto com o Identidade, por port-forward: o banco nasce vazio e o APIM exige token em tudo menos no login).\n3. Rode as pastas **1** a **4** em ordem, pelo Collection Runner, com **delay de 1000 ms**. Os passos da saga são assíncronos (eventos no RabbitMQ): os que dependem de um evento ter chegado repetem a própria requisição sozinhos, até 10 vezes, antes de falhar.\n\nTodo request manda o mesmo `X-Correlation-ID` (gerado no início da pasta 3): é por ele que se segue a ordem no Datadog, nos quatro serviços.\n\nO passo **Mercado Pago notifica o pagamento** chama o webhook com o id da cobrança. O Billing não confia na notificação: consulta o adquirente e só confirma se o Pix tiver sido pago.\n\nValidada de ponta a ponta com os quatro serviços reais (SQL Server, MongoDB e RabbitMQ locais, um proxy no lugar do APIM e um adquirente falso): 42 de 43 verificações, três rodadas seguidas. A que falta é a Auth Function, que só existe na Azure.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.collectionVariables.get('correlationId')) pm.collectionVariables.set('correlationId', 'demo-' + pm.variables.replaceIn('{{$guid}}'));"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "gateway",
+      "value": "https://pos-tech-fiap-apim.azure-api.net"
+    },
+    {
+      "key": "identidadeDireto",
+      "value": "http://localhost:8080",
+      "description": "kubectl -n postechallenge port-forward svc/identidade-api 8080:80"
+    },
+    {
+      "key": "cpfFuncionario",
+      "value": "11144477735"
+    },
+    {
+      "key": "senhaFuncionario",
+      "value": "Oficina@2026"
+    },
+    {
+      "key": "cpfCliente",
+      "value": "52998224725"
+    },
+    {
+      "key": "emailCliente",
+      "value": "cliente@oficina.test",
+      "description": "Para o Mercado Pago aceitar a cobrança no sandbox, use o e-mail da conta compradora de teste."
+    },
+    {
+      "key": "correlationId",
+      "value": ""
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "tokenCliente",
+      "value": ""
+    },
+    {
+      "key": "idFuncionario",
+      "value": ""
+    },
+    {
+      "key": "idCliente",
+      "value": ""
+    },
+    {
+      "key": "idVeiculo",
+      "value": ""
+    },
+    {
+      "key": "descricaoVeiculo",
+      "value": ""
+    },
+    {
+      "key": "idPeca",
+      "value": ""
+    },
+    {
+      "key": "idOrdem",
+      "value": ""
+    },
+    {
+      "key": "idOrdemRejeitada",
+      "value": ""
+    },
+    {
+      "key": "referenciaPagamento",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Preparação (uma vez por ambiente)",
+      "description": "O identidade-db nasce vazio. Antes de qualquer login, crie o primeiro funcionário direto no serviço:\n\n```\nkubectl -n postechallenge port-forward svc/identidade-api 8080:80\n```",
+      "item": [
+        {
+          "name": "Primeiro funcionário (direto no Identidade)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{identidadeDireto}}/api/v1/funcionarios",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"Gerente da Oficina\",\n  \"contato\": \"11999990000\",\n  \"cpf\": \"{{cpfFuncionario}}\",\n  \"cargo\": \"Gerente\",\n  \"valorHora\": 120.0,\n  \"senha\": \"{{senhaFuncionario}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "409 significa que ele já existe: pode seguir.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201, 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "if (pm.response.code < 300) { pm.collectionVariables.set('idFuncionario', pm.response.json().id); console.log('idFuncionario =', pm.collectionVariables.get('idFuncionario')); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Autenticação",
+      "item": [
+        {
+          "name": "Login do funcionário",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/identidade/api/v1/autenticacao/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cpf\": \"{{cpfFuncionario}}\",\n  \"senha\": \"{{senhaFuncionario}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Rota pública no APIM. Devolve o JWT que todas as outras rotas exigem.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "if (pm.response.code < 300) { pm.collectionVariables.set('token', pm.response.json().accessToken); console.log('token =', pm.collectionVariables.get('token')); }",
+                  "if (pm.response.code < 300) { pm.collectionVariables.set('idFuncionario', pm.response.json().funcionarioId); console.log('idFuncionario =', pm.collectionVariables.get('idFuncionario')); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Cadastro (Identidade e catálogo)",
+      "item": [
+        {
+          "name": "Cadastrar cliente",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/identidade/api/v1/clientes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cpf\": \"{{cpfCliente}}\",\n  \"nomeCompleto\": \"Ana Prado\",\n  \"telefone\": \"11988887777\",\n  \"email\": \"{{emailCliente}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "409 se o CPF já existe: rode 'Buscar cliente pelo CPF'."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201, 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "if (pm.response.code < 300) { pm.collectionVariables.set('idCliente', pm.response.json().id); console.log('idCliente =', pm.collectionVariables.get('idCliente')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buscar cliente pelo CPF",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/identidade/api/v1/clientes/busca?documento={{cpfCliente}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "if (pm.response.code < 300) { pm.collectionVariables.set('idCliente', pm.response.json().id); console.log('idCliente =', pm.collectionVariables.get('idCliente')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cadastrar veículo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/identidade/api/v1/veiculos",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clienteId\": {{idCliente}},\n  \"marca\": \"VW\",\n  \"modelo\": \"Gol\",\n  \"placa\": \"ABC1D23\",\n  \"cor\": \"Prata\",\n  \"anoModelo\": 2022,\n  \"anoFabricacao\": 2021,\n  \"kmEntrada\": 42000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201, 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "if (pm.response.code < 300) { pm.collectionVariables.set('idVeiculo', pm.response.json().id); console.log('idVeiculo =', pm.collectionVariables.get('idVeiculo')); }",
+                  "if (pm.response.code < 300) { pm.collectionVariables.set('descricaoVeiculo', pm.response.json().descricao); console.log('descricaoVeiculo =', pm.collectionVariables.get('descricaoVeiculo')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Veículos do cliente",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/identidade/api/v1/clientes/{{idCliente}}/veiculos"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "const v = pm.response.json()[0]; if (v) { pm.collectionVariables.set('idVeiculo', v.id); pm.collectionVariables.set('descricaoVeiculo', v.descricao); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login do cliente por CPF (Auth Function)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/auth",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cpf\": \"{{cpfCliente}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "O cliente entra só com o CPF, sem senha. É o token que o front do cliente usa.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "if (pm.response.code < 300) { pm.collectionVariables.set('tokenCliente', pm.response.json().access_token); console.log('tokenCliente =', pm.collectionVariables.get('tokenCliente')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cadastrar peça",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/execucao/api/v1/pecas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"Filtro de óleo\",\n  \"marca\": \"Bosch\",\n  \"codigo\": \"FO-{{$timestamp}}\",\n  \"preco\": 38.9,\n  \"quantidadeEmEstoque\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));",
+                  "if (pm.response.code < 300) { pm.collectionVariables.set('idPeca', pm.response.json().id); console.log('idPeca =', pm.collectionVariables.get('idPeca')); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Fluxo completo da OS",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": []
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "Abrir a ordem de serviço (OS)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/os/api/v1/ordens-servico",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idCliente\": {{idCliente}},\n  \"idVeiculo\": {{idVeiculo}},\n  \"idFuncionario\": {{idFuncionario}},\n  \"nomeCliente\": \"Ana Prado\",\n  \"descricaoVeiculo\": \"{{descricaoVeiculo}}\",\n  \"emailCliente\": \"{{emailCliente}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Grava a ordem, a saga e o OrdemAberta no outbox numa transação só."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));",
+                  "if (pm.response.code < 300) { pm.collectionVariables.set('idOrdem', pm.response.json().id); console.log('idOrdem =', pm.collectionVariables.get('idOrdem')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saga: aguardando diagnóstico",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/os/api/v1/ordens-servico/{{idOrdem}}/saga"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Passo assíncrono: o evento atravessa o RabbitMQ. Se ainda não chegou,",
+                  "// repete esta mesma requisição (até 10 vezes, com o delay do runner).",
+                  "const chave = 'tentativa:' + pm.info.requestName;",
+                  "const tentativas = Number(pm.collectionVariables.get(chave) || 0);",
+                  "let pronto = false; try { pronto = pm.response.code === 200 && pm.response.json().passo === 'AguardandoDiagnostico'; } catch (e) { pronto = false; }",
+                  "if (!pronto && tentativas < 10) {",
+                  "  pm.collectionVariables.set(chave, tentativas + 1);",
+                  "  console.log('ainda não, tentativa', tentativas + 1);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.unset(chave);",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "const s = pm.response.json(); console.log('passo:', s.passo, '| status da ordem:', s.statusDaOrdem);",
+                  "pm.test('saga em AguardandoDiagnostico', () => pm.expect(s.passo).to.eql('AguardandoDiagnostico'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fila da oficina (a OS chegou pelo RabbitMQ)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/execucao/api/v1/execucao/fila"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Passo assíncrono: o evento atravessa o RabbitMQ. Se ainda não chegou,",
+                  "// repete esta mesma requisição (até 10 vezes, com o delay do runner).",
+                  "const chave = 'tentativa:' + pm.info.requestName;",
+                  "const tentativas = Number(pm.collectionVariables.get(chave) || 0);",
+                  "let pronto = false; try { pronto = pm.response.json().map(o => o.idOrdem).includes(Number(pm.collectionVariables.get('idOrdem'))); } catch (e) { pronto = false; }",
+                  "if (!pronto && tentativas < 10) {",
+                  "  pm.collectionVariables.set(chave, tentativas + 1);",
+                  "  console.log('ainda não, tentativa', tentativas + 1);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.unset(chave);",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "pm.test('a ordem está na fila', () => pm.expect(pm.response.json().map(o => o.idOrdem)).to.include(Number(pm.collectionVariables.get('idOrdem'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Diagnóstico (reserva as peças)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/execucao/api/v1/execucao/ordens/{{idOrdem}}/diagnostico",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itens\": [\n    {\n      \"descricao\": \"Troca de óleo\",\n      \"tipo\": \"MaoDeObra\",\n      \"quantidade\": 1,\n      \"valorUnitario\": 120.5\n    },\n    {\n      \"tipo\": \"Peca\",\n      \"idPeca\": \"{{idPeca}}\",\n      \"quantidade\": 2\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "O preço da peça sai do catálogo. Publica DiagnosticoConcluido com os itens e o cliente."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Orçamento montado pelo Billing",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/billing/api/v1/orcamentos/os/{{idOrdem}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Passo assíncrono: o evento atravessa o RabbitMQ. Se ainda não chegou,",
+                  "// repete esta mesma requisição (até 10 vezes, com o delay do runner).",
+                  "const chave = 'tentativa:' + pm.info.requestName;",
+                  "const tentativas = Number(pm.collectionVariables.get(chave) || 0);",
+                  "let pronto = false; try { pronto = pm.response.code === 200; } catch (e) { pronto = false; }",
+                  "if (!pronto && tentativas < 10) {",
+                  "  pm.collectionVariables.set(chave, tentativas + 1);",
+                  "  console.log('ainda não, tentativa', tentativas + 1);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.unset(chave);",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "console.log('valor do orçamento:', pm.response.json().valor);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saga: aguardando aprovação",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/os/api/v1/ordens-servico/{{idOrdem}}/saga"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Passo assíncrono: o evento atravessa o RabbitMQ. Se ainda não chegou,",
+                  "// repete esta mesma requisição (até 10 vezes, com o delay do runner).",
+                  "const chave = 'tentativa:' + pm.info.requestName;",
+                  "const tentativas = Number(pm.collectionVariables.get(chave) || 0);",
+                  "let pronto = false; try { pronto = pm.response.code === 200 && pm.response.json().passo === 'AguardandoAprovacao'; } catch (e) { pronto = false; }",
+                  "if (!pronto && tentativas < 10) {",
+                  "  pm.collectionVariables.set(chave, tentativas + 1);",
+                  "  console.log('ainda não, tentativa', tentativas + 1);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.unset(chave);",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "const s = pm.response.json(); console.log('passo:', s.passo, '| status da ordem:', s.statusDaOrdem);",
+                  "pm.test('saga em AguardandoAprovacao', () => pm.expect(s.passo).to.eql('AguardandoAprovacao'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cliente aprova o orçamento (cria a cobrança Pix)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/billing/api/v1/orcamentos/os/{{idOrdem}}/aprovar",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenCliente}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Orçamento com a cobrança Pix",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/billing/api/v1/orcamentos/os/{{idOrdem}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Passo assíncrono: o evento atravessa o RabbitMQ. Se ainda não chegou,",
+                  "// repete esta mesma requisição (até 10 vezes, com o delay do runner).",
+                  "const chave = 'tentativa:' + pm.info.requestName;",
+                  "const tentativas = Number(pm.collectionVariables.get(chave) || 0);",
+                  "let pronto = false; try { pronto = pm.response.code === 200 && !!pm.response.json().referenciaExterna; } catch (e) { pronto = false; }",
+                  "if (!pronto && tentativas < 10) {",
+                  "  pm.collectionVariables.set(chave, tentativas + 1);",
+                  "  console.log('ainda não, tentativa', tentativas + 1);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.unset(chave);",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const o = pm.response.json();",
+                  "console.log('cobrança:', o.referenciaExterna, '|', o.statusDoPagamento, '|', o.urlDePagamento);",
+                  "pm.collectionVariables.set('referenciaPagamento', o.referenciaExterna);",
+                  "pm.test('cobrança criada no adquirente', () => pm.expect(o.referenciaExterna).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saga: aguardando pagamento",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/os/api/v1/ordens-servico/{{idOrdem}}/saga",
+            "description": "Daqui a saga só anda com o PagamentoConfirmado, que o Billing publica quando o adquirente confirma o pagamento."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Passo assíncrono: o evento atravessa o RabbitMQ. Se ainda não chegou,",
+                  "// repete esta mesma requisição (até 10 vezes, com o delay do runner).",
+                  "const chave = 'tentativa:' + pm.info.requestName;",
+                  "const tentativas = Number(pm.collectionVariables.get(chave) || 0);",
+                  "let pronto = false; try { pronto = pm.response.code === 200 && pm.response.json().passo === 'AguardandoPagamento'; } catch (e) { pronto = false; }",
+                  "if (!pronto && tentativas < 10) {",
+                  "  pm.collectionVariables.set(chave, tentativas + 1);",
+                  "  console.log('ainda não, tentativa', tentativas + 1);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.unset(chave);",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "const s = pm.response.json(); console.log('passo:', s.passo, '| status da ordem:', s.statusDaOrdem);",
+                  "pm.test('saga em AguardandoPagamento', () => pm.expect(s.passo).to.eql('AguardandoPagamento'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mercado Pago notifica o pagamento (webhook)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{gateway}}/billing/api/v1/pagamentos/webhook",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"payment\",\n  \"data\": {\n    \"id\": \"{{referenciaPagamento}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "É o que o Mercado Pago chama quando o Pix é pago. Rota pública: o Billing não confia no corpo, consulta o adquirente antes de confirmar. Com o adquirente de verdade, só confirma se o Pix tiver sido pago."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saga: aguardando execução (depois do pagamento)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/os/api/v1/ordens-servico/{{idOrdem}}/saga"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Passo assíncrono: o evento atravessa o RabbitMQ. Se ainda não chegou,",
+                  "// repete esta mesma requisição (até 10 vezes, com o delay do runner).",
+                  "const chave = 'tentativa:' + pm.info.requestName;",
+                  "const tentativas = Number(pm.collectionVariables.get(chave) || 0);",
+                  "let pronto = false; try { pronto = pm.response.code === 200 && pm.response.json().passo === 'AguardandoExecucao'; } catch (e) { pronto = false; }",
+                  "if (!pronto && tentativas < 10) {",
+                  "  pm.collectionVariables.set(chave, tentativas + 1);",
+                  "  console.log('ainda não, tentativa', tentativas + 1);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.unset(chave);",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "const s = pm.response.json(); console.log('passo:', s.passo, '| status da ordem:', s.statusDaOrdem);",
+                  "pm.test('saga em AguardandoExecucao', () => pm.expect(s.passo).to.eql('AguardandoExecucao'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mecânico finaliza (baixa as peças)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/execucao/api/v1/execucao/ordens/{{idOrdem}}/finalizar"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saga concluída",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/os/api/v1/ordens-servico/{{idOrdem}}/saga"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Passo assíncrono: o evento atravessa o RabbitMQ. Se ainda não chegou,",
+                  "// repete esta mesma requisição (até 10 vezes, com o delay do runner).",
+                  "const chave = 'tentativa:' + pm.info.requestName;",
+                  "const tentativas = Number(pm.collectionVariables.get(chave) || 0);",
+                  "let pronto = false; try { pronto = pm.response.code === 200 && pm.response.json().passo === 'Concluida'; } catch (e) { pronto = false; }",
+                  "if (!pronto && tentativas < 10) {",
+                  "  pm.collectionVariables.set(chave, tentativas + 1);",
+                  "  console.log('ainda não, tentativa', tentativas + 1);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.unset(chave);",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "const s = pm.response.json(); console.log('passo:', s.passo, '| status da ordem:', s.statusDaOrdem);",
+                  "pm.test('saga em Concluida', () => pm.expect(s.passo).to.eql('Concluida'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Status e histórico da OS",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/os/api/v1/ordens-servico/{{idOrdem}}/status"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "console.log(pm.response.json().historico.map(h => h.para).join(' → '));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Estoque da peça depois da baixa",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/execucao/api/v1/pecas/{{idPeca}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Compensação: cliente rejeita o orçamento",
+      "item": [
+        {
+          "name": "Abrir outra OS",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/os/api/v1/ordens-servico",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idCliente\": {{idCliente}},\n  \"idVeiculo\": {{idVeiculo}},\n  \"idFuncionario\": {{idFuncionario}},\n  \"nomeCliente\": \"Ana Prado\",\n  \"descricaoVeiculo\": \"{{descricaoVeiculo}}\",\n  \"emailCliente\": \"{{emailCliente}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.expect(pm.response.code).to.be.oneOf([201]));",
+                  "if (pm.response.code < 300) { pm.collectionVariables.set('idOrdemRejeitada', pm.response.json().id); console.log('idOrdemRejeitada =', pm.collectionVariables.get('idOrdemRejeitada')); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Esperar a OS chegar na oficina",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/execucao/api/v1/execucao/ordens/{{idOrdemRejeitada}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Passo assíncrono: o evento atravessa o RabbitMQ. Se ainda não chegou,",
+                  "// repete esta mesma requisição (até 10 vezes, com o delay do runner).",
+                  "const chave = 'tentativa:' + pm.info.requestName;",
+                  "const tentativas = Number(pm.collectionVariables.get(chave) || 0);",
+                  "let pronto = false; try { pronto = pm.response.code === 200; } catch (e) { pronto = false; }",
+                  "if (!pronto && tentativas < 10) {",
+                  "  pm.collectionVariables.set(chave, tentativas + 1);",
+                  "  console.log('ainda não, tentativa', tentativas + 1);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.unset(chave);",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "pm.test('a OS está na oficina', () => pm.expect(pm.response.code).to.eql(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Diagnóstico com peça",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/execucao/api/v1/execucao/ordens/{{idOrdemRejeitada}}/diagnostico",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itens\": [\n    {\n      \"descricao\": \"Revisão\",\n      \"tipo\": \"MaoDeObra\",\n      \"quantidade\": 1,\n      \"valorUnitario\": 300.0\n    },\n    {\n      \"tipo\": \"Peca\",\n      \"idPeca\": \"{{idPeca}}\",\n      \"quantidade\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Esperar o orçamento ser montado",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/billing/api/v1/orcamentos/os/{{idOrdemRejeitada}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Passo assíncrono: o evento atravessa o RabbitMQ. Se ainda não chegou,",
+                  "// repete esta mesma requisição (até 10 vezes, com o delay do runner).",
+                  "const chave = 'tentativa:' + pm.info.requestName;",
+                  "const tentativas = Number(pm.collectionVariables.get(chave) || 0);",
+                  "let pronto = false; try { pronto = pm.response.code === 200; } catch (e) { pronto = false; }",
+                  "if (!pronto && tentativas < 10) {",
+                  "  pm.collectionVariables.set(chave, tentativas + 1);",
+                  "  console.log('ainda não, tentativa', tentativas + 1);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.unset(chave);",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "console.log('valor do orçamento:', pm.response.json().valor);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cliente rejeita",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/billing/api/v1/orcamentos/os/{{idOrdemRejeitada}}/rejeitar",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"motivo\": \"Achou caro\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenCliente}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saga cancelada, com o motivo",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/os/api/v1/ordens-servico/{{idOrdemRejeitada}}/saga"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Passo assíncrono: o evento atravessa o RabbitMQ. Se ainda não chegou,",
+                  "// repete esta mesma requisição (até 10 vezes, com o delay do runner).",
+                  "const chave = 'tentativa:' + pm.info.requestName;",
+                  "const tentativas = Number(pm.collectionVariables.get(chave) || 0);",
+                  "let pronto = false; try { pronto = pm.response.code === 200 && pm.response.json().passo === 'Cancelada'; } catch (e) { pronto = false; }",
+                  "if (!pronto && tentativas < 10) {",
+                  "  pm.collectionVariables.set(chave, tentativas + 1);",
+                  "  console.log('ainda não, tentativa', tentativas + 1);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.unset(chave);",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "const s = pm.response.json(); console.log('passo:', s.passo, '| status da ordem:', s.statusDaOrdem);",
+                  "pm.test('saga em Cancelada', () => pm.expect(s.passo).to.eql('Cancelada'));",
+                  "pm.test('motivo registrado', () => pm.expect(pm.response.json().motivoDaCompensacao).to.eql('Achou caro'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ordem cancelada na oficina",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/execucao/api/v1/execucao/ordens/{{idOrdemRejeitada}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Passo assíncrono: o evento atravessa o RabbitMQ. Se ainda não chegou,",
+                  "// repete esta mesma requisição (até 10 vezes, com o delay do runner).",
+                  "const chave = 'tentativa:' + pm.info.requestName;",
+                  "const tentativas = Number(pm.collectionVariables.get(chave) || 0);",
+                  "let pronto = false; try { pronto = pm.response.code === 200 && pm.response.json().etapa === 'Cancelada'; } catch (e) { pronto = false; }",
+                  "if (!pronto && tentativas < 10) {",
+                  "  pm.collectionVariables.set(chave, tentativas + 1);",
+                  "  console.log('ainda não, tentativa', tentativas + 1);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.unset(chave);",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "pm.test('cancelada', () => pm.expect(pm.response.json().etapa).to.eql('Cancelada'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reserva da peça devolvida",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{gateway}}/execucao/api/v1/pecas/{{idPeca}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Passo assíncrono: o evento atravessa o RabbitMQ. Se ainda não chegou,",
+                  "// repete esta mesma requisição (até 10 vezes, com o delay do runner).",
+                  "const chave = 'tentativa:' + pm.info.requestName;",
+                  "const tentativas = Number(pm.collectionVariables.get(chave) || 0);",
+                  "let pronto = false; try { pronto = !pm.response.json().reservas.map(r => r.idOrdem).includes(Number(pm.collectionVariables.get('idOrdemRejeitada'))); } catch (e) { pronto = false; }",
+                  "if (!pronto && tentativas < 10) {",
+                  "  pm.collectionVariables.set(chave, tentativas + 1);",
+                  "  console.log('ainda não, tentativa', tentativas + 1);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.collectionVariables.unset(chave);",
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
+                  "pm.test('sem reserva da OS cancelada', () => pm.expect(pm.response.json().reservas.map(r => r.idOrdem)).to.not.include(Number(pm.collectionVariables.get('idOrdemRejeitada'))));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
