@@ -7,6 +7,9 @@ Microsserviço de **Ordem de Serviço** do Tech Challenge Fase 4 (FIAP 13SOAT).
 Dono da ordem, do status e do histórico — e **orquestrador da Saga** que
 coordena o fluxo entre os quatro serviços.
 
+
+> Visão de conjunto dos quatro serviços, com o diagrama da arquitetura e da saga: [`docs/arquitetura.md`](docs/arquitetura.md).
+
 ## O que este serviço faz
 
 | Responsabilidade | Detalhe |
