@@ -11,6 +11,13 @@
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Os scripts viajam dentro do assembly: o serviço aplica na partida, sem
+         caminho de arquivo para errar dentro do contêiner. -->
+    <EmbeddedResource Include="schema-os.sql" />
+    <EmbeddedResource Include="schema-mensageria.sql" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>

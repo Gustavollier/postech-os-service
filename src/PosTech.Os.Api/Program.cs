@@ -56,6 +56,10 @@ builder.Services.AddHostedService<VarredorDeTimeout>();
 
 var app = builder.Build();
 
+// O schema é idempotente e embutido no assembly. Aplicar aqui tira do caminho
+// o passo manual que cada ambiente novo exigia.
+await InstaladorDoSchema.AplicarAsync(connectionString);
+
 // Swagger ligado também fora de desenvolvimento: é entregável da fase, e o
 // APIM termina o TLS antes do tráfego chegar aqui.
 app.UseSwagger();

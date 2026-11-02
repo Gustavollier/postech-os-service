@@ -83,15 +83,15 @@ Swagger em `/swagger`.
 # Infraestrutura (RabbitMQ, SQL Server, Mongo)
 docker compose -f docker-compose.yml up -d
 
-# Schema
-sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -No -i src/PosTech.Persistencia/schema-os.sql
-sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -No -i src/PosTech.Persistencia/schema-mensageria.sql
-
 # API
 export SqlConnectionString="Server=localhost;Database=os-db;User Id=sa;Password=...;TrustServerCertificate=true"
 export RabbitMqConnectionString="amqp://postech:senha@localhost:5672/"
 dotnet run --project src/PosTech.Os.Api
 ```
+
+O schema (`schema-os.sql` e `schema-mensageria.sql`) é aplicado pelo próprio
+serviço na partida. Os scripts são idempotentes e vão embutidos no assembly,
+então ambiente novo não tem passo manual.
 
 ## Testes
 
@@ -99,7 +99,7 @@ dotnet run --project src/PosTech.Os.Api
 dotnet test
 ```
 
-**93 testes, 94% de cobertura de linha**, sendo 5 deles cenários BDD. Os de integração sobem RabbitMQ e SQL
+**96 testes, 94% de cobertura de linha**, sendo 5 deles cenários BDD. Os de integração sobem RabbitMQ e SQL
 Server de verdade via Testcontainers — precisa de Docker. Dublê não prova
 topologia nem atomicidade de transação, que é justamente o que mais importa
 aqui.
