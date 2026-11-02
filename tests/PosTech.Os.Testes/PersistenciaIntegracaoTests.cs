@@ -177,7 +177,8 @@ public sealed class PersistenciaIntegracaoTests : IAsyncLifetime
         await saga.CriarAsync(estado);
 
         estado = OrquestradorDaSaga.Avancar(estado, new DiagnosticoConcluido(
-            200, 7, [new ItemDaOrdem("Troca", ETipoItem.MaoDeObra, 1, 100m)], 100m, DateTime.UtcNow), DateTime.UtcNow).Estado;
+            200, 7, 10, "Ana Prado", "ana@oficina.test",
+            [new ItemDaOrdem("Troca", ETipoItem.MaoDeObra, 1, 100m)], 100m, DateTime.UtcNow), DateTime.UtcNow).Estado;
 
         estado = OrquestradorDaSaga.Avancar(estado, new OrcamentoGerado(200, "orc-200", 100m, DateTime.UtcNow), DateTime.UtcNow).Estado;
 

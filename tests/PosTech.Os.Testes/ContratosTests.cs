@@ -163,6 +163,9 @@ public class ContratosTests
         var evento = new DiagnosticoConcluido(
             IdOrdem: 42,
             IdFuncionarioResponsavel: 7,
+            IdCliente: 10,
+            NomeCliente: "Ana Prado",
+            EmailCliente: "ana@oficina.test",
             Itens:
             [
                 new ItemDaOrdem("Troca de óleo", ETipoItem.MaoDeObra, 1, 120.50m),
@@ -215,6 +218,7 @@ public class FormatoDoFioTests
     {
         var evento = new DiagnosticoConcluido(
             IdOrdem: 1, IdFuncionarioResponsavel: 7,
+            IdCliente: 10, NomeCliente: "Ana Prado", EmailCliente: "ana@oficina.test",
             Itens: [new ItemDaOrdem("Troca de óleo", ETipoItem.MaoDeObra, 1, 120.50m)],
             ValorTotal: 120.50m,
             ConcluidoEm: new DateTime(2026, 11, 1, 12, 0, 0, DateTimeKind.Utc));
@@ -231,7 +235,8 @@ public class FormatoDoFioTests
     public void Enum_por_nome_volta_igual_na_desserializacao()
     {
         var evento = new DiagnosticoConcluido(
-            1, 7, [new ItemDaOrdem("Pastilha", ETipoItem.Peca, 4, 89.90m)], 359.60m, DateTime.UtcNow);
+            1, 7, 10, "Ana Prado", "ana@oficina.test",
+            [new ItemDaOrdem("Pastilha", ETipoItem.Peca, 4, 89.90m)], 359.60m, DateTime.UtcNow);
 
         var json = SerializacaoDeEvento.Serializar(
             Envelope<DiagnosticoConcluido>.Criar(evento, "corr-1", "execucao-service"));

@@ -18,6 +18,7 @@ public class OrquestradorDaSagaTests
 
     private static DiagnosticoConcluido UmDiagnostico(decimal total = 198.30m) => new(
         IdOrdem: 1, IdFuncionarioResponsavel: 7,
+        IdCliente: 10, NomeCliente: "Ana Prado", EmailCliente: "ana@oficina.test",
         Itens: [new ItemDaOrdem("Troca de óleo", ETipoItem.MaoDeObra, 1, total)],
         ValorTotal: total, ConcluidoEm: Agora);
 

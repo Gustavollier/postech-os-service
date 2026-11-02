@@ -71,7 +71,8 @@ public sealed class RegrasDaOrdemTests : IAsyncLifetime
         var caminho = new (EStatusOrdem Alvo, Func<EstadoDaSaga, DateTime, Decisao> Passo)[]
         {
             (EStatusOrdem.EmDiagnostico, (e, a) => OrquestradorDaSaga.Avancar(e, new DiagnosticoConcluido(
-                idOrdem, 30, [new ItemDaOrdem("Troca", ETipoItem.MaoDeObra, 1, 100m)], 100m, a), a)),
+                idOrdem, 30, 10, "Ana Prado", "ana@oficina.test",
+                [new ItemDaOrdem("Troca", ETipoItem.MaoDeObra, 1, 100m)], 100m, a), a)),
             (EStatusOrdem.AguardandoAprovacao, (e, a) => OrquestradorDaSaga.Avancar(e, new OrcamentoGerado(
                 idOrdem, $"orc-{idOrdem}", 100m, a), a)),
             (EStatusOrdem.AguardandoAprovacao, (e, a) => OrquestradorDaSaga.Avancar(e, new OrcamentoAprovado(

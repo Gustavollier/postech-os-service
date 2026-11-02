@@ -231,6 +231,7 @@ public sealed class SagaPontaAPontaTests : IAsyncLifetime
                 await PublicarAsync(
                     new DiagnosticoConcluido(
                         dados.IdOrdem, dados.IdFuncionario,
+                        dados.IdCliente, dados.NomeCliente, dados.EmailCliente,
                         [new ItemDaOrdem("Troca de óleo", ETipoItem.MaoDeObra, 1, 120.50m),
                          new ItemDaOrdem("Filtro", ETipoItem.Peca, 2, 38.90m)],
                         198.30m, DateTime.UtcNow),
@@ -321,6 +322,7 @@ public sealed class SagaPontaAPontaTests : IAsyncLifetime
                 var dados = envelope.Ler<OrdemAberta>()!;
                 await PublicarAsync(
                     new DiagnosticoConcluido(dados.IdOrdem, 30,
+                        dados.IdCliente, dados.NomeCliente, dados.EmailCliente,
                         [new ItemDaOrdem("Troca", ETipoItem.MaoDeObra, 1, 100m)], 100m, DateTime.UtcNow),
                     envelope.CorrelationId, "execucao-service");
             },
@@ -393,6 +395,7 @@ public sealed class SagaPontaAPontaTests : IAsyncLifetime
                 var dados = envelope.Ler<OrdemAberta>()!;
                 await PublicarAsync(
                     new DiagnosticoConcluido(dados.IdOrdem, 30,
+                        dados.IdCliente, dados.NomeCliente, dados.EmailCliente,
                         [new ItemDaOrdem("Troca", ETipoItem.MaoDeObra, 1, 100m)], 100m, DateTime.UtcNow),
                     envelope.CorrelationId, "execucao-service");
             },
@@ -458,6 +461,7 @@ public sealed class SagaPontaAPontaTests : IAsyncLifetime
                 var dados = envelope.Ler<OrdemAberta>()!;
                 await PublicarAsync(
                     new DiagnosticoConcluido(dados.IdOrdem, 30,
+                        dados.IdCliente, dados.NomeCliente, dados.EmailCliente,
                         [new ItemDaOrdem("Troca", ETipoItem.MaoDeObra, 1, 100m)], 100m, DateTime.UtcNow),
                     envelope.CorrelationId, "execucao-service");
             },
@@ -521,7 +525,8 @@ public sealed class SagaPontaAPontaTests : IAsyncLifetime
         await EsperarPassoAsync(idOrdem, EPassoDaSaga.AguardandoDiagnostico, segundos: 20);
 
         var diagnostico = new DiagnosticoConcluido(
-            idOrdem, 30, [new ItemDaOrdem("Troca", ETipoItem.MaoDeObra, 1, 100m)], 100m, DateTime.UtcNow);
+            idOrdem, 30, 10, "Ana Prado", "ana@oficina.test",
+            [new ItemDaOrdem("Troca", ETipoItem.MaoDeObra, 1, 100m)], 100m, DateTime.UtcNow);
 
         // A MESMA linha de outbox publicada duas vezes: é o que acontece quando
         // o processo morre entre a confirmação do broker e a marcação.
