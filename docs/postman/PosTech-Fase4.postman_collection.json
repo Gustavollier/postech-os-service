@@ -739,14 +739,14 @@
             "url": "{{gateway}}/billing/api/v1/pagamentos/webhook",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"type\": \"payment\",\n  \"data\": {\n    \"id\": \"{{referenciaPagamento}}\"\n  }\n}",
+              "raw": "{\n  \"type\": \"order\",\n  \"action\": \"order.processed\",\n  \"data\": {\n    \"id\": \"{{referenciaPagamento}}\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "É o que o Mercado Pago chama quando o Pix é pago. Rota pública: o Billing não confia no corpo, consulta o adquirente antes de confirmar. Com o adquirente de verdade, só confirma se o Pix tiver sido pago."
+            "description": "É o que o Mercado Pago chama quando o Pix é pago (notificação do tópico order, com o id do pedido). Rota pública: o Billing não confia no corpo, consulta o pedido no adquirente antes de confirmar."
           },
           "event": [
             {
