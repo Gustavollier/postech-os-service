@@ -136,6 +136,7 @@ public sealed class VarredorDeTimeout : BackgroundService
     private readonly IServiceScopeFactory _escopos;
     private readonly ILogger<VarredorDeTimeout> _log;
     private readonly TimeSpan _prazo;
+    private readonly TimeSpan _prazoDePagamento;
     private readonly TimeSpan _intervalo;
 
     public VarredorDeTimeout(IServiceScopeFactory escopos, IConfiguration configuracao, ILogger<VarredorDeTimeout> log)
@@ -149,6 +150,14 @@ public sealed class VarredorDeTimeout : BackgroundService
         // cenário BDD de compensação por prazo rodar em segundos em vez de em
         // uma hora. Em produção os valores continuam inteiros.
         _prazo = TimeSpan.FromMinutes(configuracao.GetValue("Saga:PrazoDeExecucaoEmMinutos", 60.0));
+
+        // Esperar o cliente pagar é uma espera mais curta que esperar o reparo:
+        // o Pix do adquirente expira, e a ordem não pode ficar presa depois
+        // disso. Cai no prazo de execução quando não está configurado, para a
+        // varredura nunca ficar sem prazo nenhum neste passo.
+        _prazoDePagamento = TimeSpan.FromMinutes(
+            configuracao.GetValue("Saga:PrazoDePagamentoEmMinutos", 30.0));
+
         _intervalo = TimeSpan.FromMinutes(configuracao.GetValue("Saga:IntervaloDaVarreduraEmMinutos", 5.0));
     }
 
@@ -161,7 +170,8 @@ public sealed class VarredorDeTimeout : BackgroundService
                 using var escopo = _escopos.CreateScope();
                 var manipulador = escopo.ServiceProvider.GetRequiredService<ManipuladorDaSaga>();
 
-                var compensadas = await manipulador.CompensarParadasAsync(_prazo, stoppingToken);
+                var compensadas = await manipulador.CompensarParadasAsync(
+                    _prazo, _prazoDePagamento, stoppingToken);
 
                 if (compensadas > 0)
                     _log.LogWarning("{Quantidade} sagas compensadas por timeout.", compensadas);

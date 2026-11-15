@@ -88,15 +88,50 @@ public sealed class ManipuladorDaSaga
     }
 
     /// <summary>
-    /// Compensa as sagas que ficaram esperando a execução além do prazo.
+    /// Compensa as sagas que pararam num passo que espera algo de fora, além do
+    /// prazo.
     ///
     /// Roda em varredura porque ninguém publica o fato de algo não ter
     /// acontecido. É o único caminho da saga que não começa num evento.
+    ///
+    /// Dois passos esperam alguém de fora e por isso podem parar para sempre:
+    /// <see cref="EPassoDaSaga.AguardandoPagamento"/>, quando a cobrança não
+    /// nasceu no adquirente ou o cliente nunca pagou, e
+    /// <see cref="EPassoDaSaga.AguardandoExecucao"/>, quando a oficina não
+    /// assume a ordem. Prazos separados: esperar um Pix e esperar um reparo não
+    /// são a mesma espera.
     /// </summary>
-    public async Task<int> CompensarParadasAsync(TimeSpan prazo, CancellationToken cancellationToken = default)
+    public async Task<int> CompensarParadasAsync(
+        TimeSpan prazoDeExecucao,
+        TimeSpan? prazoDePagamento = null,
+        CancellationToken cancellationToken = default)
+    {
+        var compensadas = await CompensarPassoAsync(
+            EPassoDaSaga.AguardandoPagamento,
+            prazoDePagamento ?? prazoDeExecucao,
+            OrquestradorDaSaga.PagamentoNaoAconteceu,
+            "o pagamento não foi concluído",
+            cancellationToken).ConfigureAwait(false);
+
+        compensadas += await CompensarPassoAsync(
+            EPassoDaSaga.AguardandoExecucao,
+            prazoDeExecucao,
+            OrquestradorDaSaga.ExecucaoNaoAssumiu,
+            "a execução não assumiu",
+            cancellationToken).ConfigureAwait(false);
+
+        return compensadas;
+    }
+
+    private async Task<int> CompensarPassoAsync(
+        EPassoDaSaga passo,
+        TimeSpan prazo,
+        Func<EstadoDaSaga, DateTime, Decisao> compensacao,
+        string oQueFaltou,
+        CancellationToken cancellationToken)
     {
         var paradas = await _sagas
-            .ObterParadasAsync(EPassoDaSaga.AguardandoExecucao, prazo, limite: 50, cancellationToken)
+            .ObterParadasAsync(passo, prazo, limite: 50, cancellationToken)
             .ConfigureAwait(false);
 
         var compensadas = 0;
@@ -104,7 +139,7 @@ public sealed class ManipuladorDaSaga
         foreach (var estado in paradas)
         {
             var statusAntes = estado.StatusDaOrdem;
-            var decisao = OrquestradorDaSaga.ExecucaoNaoAssumiu(estado, _agora());
+            var decisao = compensacao(estado, _agora());
 
             if (!decisao.Mudou)
                 continue;
@@ -121,8 +156,8 @@ public sealed class ManipuladorDaSaga
                 .ConfigureAwait(false);
 
             _log.LogWarning(
-                "Ordem {IdOrdem} compensada por timeout: a execução não assumiu em {Prazo}.",
-                estado.IdOrdem, prazo);
+                "Ordem {IdOrdem} compensada por timeout: {OQueFaltou} em {Prazo}.",
+                estado.IdOrdem, oQueFaltou, prazo);
 
             compensadas++;
         }

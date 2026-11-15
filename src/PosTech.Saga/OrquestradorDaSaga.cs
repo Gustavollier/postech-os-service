@@ -180,6 +180,29 @@ public static class OrquestradorDaSaga
     }
 
     /// <summary>
+    /// O pagamento não foi concluído dentro do prazo. Também vem do varredor,
+    /// e pelo mesmo motivo: o adquirente publica pagamento feito e pagamento
+    /// recusado, nunca pagamento que não chegou.
+    ///
+    /// Sem este caminho a saga podia parar para sempre em
+    /// <see cref="EPassoDaSaga.AguardandoPagamento"/>: basta a cobrança não ter
+    /// sido criada no adquirente (token ausente, timeout, erro de rede) para a
+    /// aprovação valer sem que nenhum evento de pagamento saia depois.
+    ///
+    /// <see cref="Compensar"/> já faz a coisa certa aqui: sem pagamento
+    /// registrado, cancela sem inventar estorno.
+    /// </summary>
+    public static Decisao PagamentoNaoAconteceu(EstadoDaSaga estado, DateTime agora)
+    {
+        ArgumentNullException.ThrowIfNull(estado);
+
+        if (estado.Passo != EPassoDaSaga.AguardandoPagamento)
+            return Decisao.Ignorar(estado);
+
+        return Compensar(estado, "O pagamento não foi concluído dentro do prazo.", agora);
+    }
+
+    /// <summary>
     /// Cancelamento pedido pela recepção. Entra pelo mesmo caminho de
     /// compensação para não existirem dois jeitos de desfazer a mesma coisa.
     /// </summary>
