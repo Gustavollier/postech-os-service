@@ -220,6 +220,36 @@ public class OrquestradorDaSagaTests
 
     // -----------------------------------------------------------------------
 
+    [Fact]
+    public void Pagamento_que_nao_acontece_cancela_sem_estornar()
+    {
+        var estado = AteAguardandoPagamento();
+
+        var decisao = OrquestradorDaSaga.PagamentoNaoAconteceu(estado, Agora);
+
+        // Direto para Cancelada, e não Compensando: nenhum pagamento foi
+        // registrado, então não há estorno para esperar. Publicar
+        // PagamentoEstornado aqui inventaria movimento financeiro.
+        Assert.Equal(EPassoDaSaga.Cancelada, decisao.Estado.Passo);
+        Assert.Equal("O pagamento não foi concluído dentro do prazo.", decisao.Estado.MotivoDaCompensacao);
+        Assert.Contains(decisao.EventosAPublicar, e => e is OrcamentoCancelado);
+        Assert.Contains(decisao.EventosAPublicar, e => e is OrdemCancelada);
+        Assert.DoesNotContain(decisao.EventosAPublicar, e => e is PagamentoEstornado);
+    }
+
+    [Fact]
+    public void Pagamento_que_nao_acontece_ignora_saga_em_outro_passo()
+    {
+        // A varredura é por passo, mas o estado pode ter mudado entre a
+        // consulta e a decisão: o webhook do adquirente chega a qualquer hora.
+        var estado = AteAguardandoExecucao();
+
+        var decisao = OrquestradorDaSaga.PagamentoNaoAconteceu(estado, Agora);
+
+        Assert.False(decisao.Mudou);
+        Assert.Equal(EPassoDaSaga.AguardandoExecucao, decisao.Estado.Passo);
+    }
+
     private static EstadoDaSaga AteAguardandoAprovacao()
     {
         var estado = Nova();
