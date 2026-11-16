@@ -151,12 +151,13 @@ testes"*. Serviço: **Execução** (pipeline mais rápido, uns 5 minutos).
 
 | # | O que fazer | Fala sugerida |
 | --- | --- | --- |
-| 1 | Abrir um PR pequeno no `postech-execucao-service` (um texto de log, por exemplo) | "Vou fazer uma mudança pequena e abrir um pull request." |
+| 0 | `GET {{gateway}}/execucao/health/ready` | "Antes da mudança, a rota responde só o status." |
+| 1 | Abrir o [PR #4 do `postech-execucao-service`](https://github.com/Gustavollier/postech-execucao-service/pull/4), que já está pronto: a mesma rota passa a responder também o nome do serviço | "Esta é uma mudança pequena, já em pull request." |
 | 2 | Aba *Checks* do PR: **Build, testes e cobertura** | "A pipeline sobe MongoDB e RabbitMQ de verdade e roda os 141 testes. Abaixo de 80% de cobertura, ela reprova." |
 | 3 | **SonarCloud** → abrir o projeto | "Depois o SonarCloud analisa qualidade, bugs e vulnerabilidades. O quality gate também bloqueia o merge." |
 | 4 | Mergear o PR → *Actions* → **Imagem e deploy no AKS** | "Com o merge, a pipeline gera a imagem com a tag do commit, publica no registro e atualiza o deployment no Kubernetes." |
 | 5 | `kubectl -n postechallenge get pods -w` | "O pod novo sobe, passa no health check, e só então o antigo sai. Sem indisponibilidade." |
-| 6 | `GET {{gateway}}/execucao/health` | "E o serviço está no ar com a versão nova." |
+| 6 | `GET {{gateway}}/execucao/health/ready` de novo | Agora vem `"servico": "execucao-service"`. "E a versão nova está no ar, respondendo pelo gateway." |
 
 Dica: gravem este cenário separado e editem — a espera da pipeline não
 precisa ir inteira para o vídeo.
@@ -175,6 +176,7 @@ Cobre *"monitoramento e rastreamento dos fluxos distribuídos"*.
 | 4 | Datadog → dashboard **PosTechChallenge — Oficina Mecânica (Fase 4)** | Mostrar os widgets da saga, latência e Kubernetes | "E o painel operacional: ordens por passo da saga, eventos por tipo, compensações por prazo, latência e consumo dos pods." |
 | 5 | Datadog → **Monitors** | Os alertas `[PosTech] …` | "Há alertas para falha no processamento de ordens, latência alta e indisponibilidade do gateway." |
 
+Os quatro serviços enviam traces ao Datadog (o tracer .NET é injetado no pod).
 Se o trace do APM não ligar os serviços através da fila, não insistam: o
 item 2 (logs pelo Correlation ID) prova o rastreamento e não depende disso.
 
