@@ -134,7 +134,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 201, 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "// 401 também é sucesso aqui: a rota só aceita chamada sem token enquanto a\n// equipe está vazia. Com o primeiro funcionário criado, a porta fecha.\npm.test('status 201, 409 ou 401 (ambiente já preparado)', () => pm.expect(pm.response.code).to.be.oneOf([201, 409, 401]));",
                   "if (pm.response.code < 300) { pm.collectionVariables.set('idFuncionario', pm.response.json().id); console.log('idFuncionario =', pm.collectionVariables.get('idFuncionario')); }"
                 ]
               }

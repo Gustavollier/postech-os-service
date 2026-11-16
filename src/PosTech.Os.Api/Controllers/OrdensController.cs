@@ -5,6 +5,8 @@ using PosTech.Os.Api.Aplicacao;
 using PosTech.Persistencia;
 using PosTech.Saga;
 
+using PosTech.Seguranca;
+
 namespace PosTech.Os.Api.Controllers;
 
 public sealed record AbrirOrdemRequest(
@@ -28,6 +30,7 @@ public sealed record OrdemResponse(
 
 [ApiController]
 [Route("api/v1/ordens-servico")]
+[Exige(Perfil.Autenticado)]
 public sealed class OrdensController : ControllerBase
 {
     private readonly IOrdemRepositorio _ordens;
@@ -45,6 +48,7 @@ public sealed class OrdensController : ControllerBase
     /// processo do outbox, então esta resposta não espera o broker.
     /// </summary>
     [HttpPost]
+    [Exige(Perfil.Equipe)]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Abrir([FromBody] AbrirOrdemRequest corpo, CancellationToken cancellationToken)
@@ -79,7 +83,7 @@ public sealed class OrdensController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Obter(int id, CancellationToken cancellationToken)
     {
-        var ordem = await _ordens.ObterAsync(id, cancellationToken);
+        var ordem = await OrdemVisivelAsync(id, cancellationToken);
 
         return ordem is null ? NotFound() : Ok(Mapear(ordem));
     }
@@ -92,6 +96,12 @@ public sealed class OrdensController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Listar([FromQuery] int? idCliente, CancellationToken cancellationToken)
     {
+        // O filtro do cliente não é um pedido dele, é uma imposição: sem isto
+        // bastava omitir ?idCliente= para receber as ordens de todo mundo.
+        var quem = QuemChama.De(HttpContext);
+        if (quem.EhCliente)
+            idCliente = quem.IdCliente ?? 0;
+
         var ordens = await _ordens.ListarAsync(idCliente, cancellationToken);
 
         return Ok(ordens.Select(Mapear));
@@ -102,7 +112,7 @@ public sealed class OrdensController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Status(int id, CancellationToken cancellationToken)
     {
-        var ordem = await _ordens.ObterAsync(id, cancellationToken);
+        var ordem = await OrdemVisivelAsync(id, cancellationToken);
 
         if (ordem is null)
             return NotFound();
@@ -135,6 +145,10 @@ public sealed class OrdensController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Saga(int id, CancellationToken cancellationToken)
     {
+        // A saga não guarda o cliente; a posse vem da ordem.
+        if (await OrdemVisivelAsync(id, cancellationToken) is null)
+            return NotFound();
+
         var estado = await _sagas.ObterAsync(id, cancellationToken);
 
         if (estado is null)
@@ -153,6 +167,20 @@ public sealed class OrdensController : ControllerBase
             emAndamento = estado.EstaEmAndamento,
             atualizadoEm = estado.AtualizadoEm,
         });
+    }
+
+    /// <summary>
+    /// A ordem, se quem chama pode vê-la. Ordem de outro cliente responde como
+    /// inexistente — 404, não 403 —, para a rota não servir de sonda de quais
+    /// números de ordem existem.
+    /// </summary>
+    private async Task<OrdemResumida?> OrdemVisivelAsync(int id, CancellationToken cancellationToken)
+    {
+        var ordem = await _ordens.ObterAsync(id, cancellationToken);
+
+        return ordem is not null && QuemChama.De(HttpContext).PodeVerDadosDoCliente(ordem.IdCliente)
+            ? ordem
+            : null;
     }
 
     private static OrdemResponse Mapear(OrdemResumida o) => new(

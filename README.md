@@ -87,6 +87,18 @@ O fluxo completo pelos quatro serviços, pelo API Management, está na coleção
 abertura, diagnóstico, orçamento, aprovação, pagamento, execução e a compensação por rejeição,
 com testes em cada passo.
 
+## Quem pode o quê
+
+O gateway valida o token; o serviço decide o que cada perfil alcança, lendo `role` e `ClienteId` do JWT repassado (`src/PosTech.Os.Api/Acesso.cs`).
+
+| Rota | Equipe | Cliente |
+|---|---|---|
+| `POST /ordens-servico` | sim | não (403) |
+| `GET /ordens-servico` | todas | só as dele: o filtro vem do token, não da query |
+| `GET /ordens-servico/{id}`, `/status`, `/saga` | sim | só da própria ordem; a de outro responde 404 |
+
+Sem token, 401. `/health` continua público.
+
 ## Rodar local
 
 ```bash
