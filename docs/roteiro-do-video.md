@@ -2,6 +2,10 @@
 
 O enunciado pede quatro coisas no vídeo. Cada bloco abaixo diz qual delas cobre.
 
+Para o passo a passo de cada cenário — o que abrir, o que clicar e uma fala
+sugerida, inclusive o tour pela infraestrutura — veja
+[`cenarios-do-video.md`](cenarios-do-video.md).
+
 | Exigência | Onde |
 | --- | --- |
 | Fluxo completo de uma OS passando pelos microsserviços | Bloco 3 |
@@ -114,7 +118,7 @@ Serviço: **Execução** (o pipeline mais rápido).
    descrição de uma rota no Swagger — e dar push na `main` (ou abrir e mergear
    o PR, se a `main` estiver protegida, o que é melhor ainda para mostrar).
 2. GitHub Actions: mostrar os jobs rodando.
-   - **Build, testes e cobertura:** 120 testes com MongoDB e RabbitMQ reais, e o
+   - **Build, testes e cobertura:** 141 testes com MongoDB e RabbitMQ reais, e o
      **gate de 80%** que reprova a pipeline abaixo disso.
    - **SonarCloud:** quality gate. Abrir o painel do projeto (cobertura, bugs,
      vulnerabilidades).
