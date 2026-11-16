@@ -39,7 +39,9 @@ public sealed class AmbienteDaSaga : IAsyncDisposable
 
     public HttpClient Cliente(string correlationId)
     {
-        var cliente = Fabrica.CreateClient();
+        // Por padrão quem chama é um gerente: o que os testes de fluxo querem
+        // exercitar é o serviço, não a recusa. Quem testa acesso troca com Como().
+        var cliente = Fabrica.CreateClient().Como(TokenDeTeste.Gerente());
         cliente.DefaultRequestHeaders.Add("X-Correlation-ID", correlationId);
         return cliente;
     }
