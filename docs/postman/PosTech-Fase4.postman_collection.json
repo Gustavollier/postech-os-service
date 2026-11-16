@@ -712,7 +712,7 @@
                   "// repete esta mesma requisição (até 10 vezes, com o delay do runner).",
                   "const chave = 'tentativa:' + pm.info.requestName;",
                   "const tentativas = Number(pm.collectionVariables.get(chave) || 0);",
-                  "let pronto = false; try { pronto = pm.response.code === 200 && pm.response.json().passo === 'AguardandoPagamento'; } catch (e) { pronto = false; }",
+                  "let pronto = false; try { pronto = pm.response.code === 200 && ['AguardandoPagamento', 'AguardandoExecucao'].includes(pm.response.json().passo); } catch (e) { pronto = false; }",
                   "if (!pronto && tentativas < 10) {",
                   "  pm.collectionVariables.set(chave, tentativas + 1);",
                   "  console.log('ainda não, tentativa', tentativas + 1);",
@@ -722,7 +722,7 @@
                   "pm.collectionVariables.unset(chave);",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.be.oneOf([200]));",
                   "const s = pm.response.json(); console.log('passo:', s.passo, '| status da ordem:', s.statusDaOrdem);",
-                  "pm.test('saga em AguardandoPagamento', () => pm.expect(s.passo).to.eql('AguardandoPagamento'));"
+                  "// Com o webhook configurado, o Mercado Pago pode confirmar o Pix de teste\n// antes desta leitura: a saga já estar em execução também é o caminho certo.\npm.test('saga em AguardandoPagamento (ou já paga)', () => pm.expect(s.passo).to.be.oneOf(['AguardandoPagamento', 'AguardandoExecucao']));"
                 ]
               }
             }
