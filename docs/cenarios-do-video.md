@@ -1,6 +1,7 @@
 # Cenários do vídeo — o que mostrar e o que falar
 
-Complemento do [`roteiro-do-video.md`](roteiro-do-video.md). O roteiro diz a
+Complemento do [`roteiro-do-video.md`](roteiro-do-video.md). Os dados prontos para cada cenário — CPFs,
+ordens e peças — estão em [`massa-de-testes.md`](massa-de-testes.md). O roteiro diz a
 ordem e o tempo de cada bloco; este arquivo é a cola de quem está gravando:
 para cada cenário, **o que abrir**, **o que fazer na tela** e **uma fala
 sugerida**. As falas são ponto de partida — digam com as palavras de vocês.
@@ -65,7 +66,7 @@ Passem rápido, uma frase por tela.
 
 Cobre a exigência *"fluxo completo de uma OS passando pelos microsserviços"*.
 
-**Preparação:** logado no painel como gerente.
+**Preparação:** logado no painel como gerente. Para não cadastrar nada ao vivo, usem a massa: ordem #5 para o diagnóstico, #3 para o cliente aprovar (Marina), #2 para finalizar.
 
 | # | O que fazer | O que aparece | Fala sugerida |
 | --- | --- | --- | --- |
@@ -86,7 +87,9 @@ clicar *Executar* em cada passo conforme acende. A tela mostra de qual serviço
 é cada chamada, o estado da saga ao vivo e um único *Correlation ID* para o
 fluxo todo — guardem esse id para o cenário 6.
 
-**Se o pagamento não confirmar em ~30 s:** no Postman, pasta 3, request
+**O Pix de teste nem sempre é imediato.** O Mercado Pago costuma aprovar em poucos segundos, mas já levou perto de dois minutos. Se demorar, esperem e cortem na edição: a tela atualiza sozinha quando o webhook chega.
+
+**Se quiserem forçar depois de ~2 min:** no Postman, pasta 3, request
 *"Mercado Pago notifica o pagamento (webhook)"*. Ele entrega a notificação com
 o id real do pedido; o Billing consulta o Mercado Pago de verdade.
 
